@@ -1,548 +1,185 @@
-# Extractor
-A cross-platform .scs extractor for both HashFS and ZIP.
+# Universal SCS Extractor
 
+Universal SCS Extractor — графический и консольный инструмент для чтения, анализа и распаковки архивов Euro Truck Simulator 2 и American Truck Simulator. Приложение написано на Python, не требует .NET и объединяет распаковщик, поиск скрытых HashFS-путей, просмотр структуры, обслуживание архивов и менеджер плагинов в одном исполняемом файле.
 
-## Features
-* Supports HashFS v1 and v2 as well as ZIP (including "locked" ZIP files)
-* Can extract multiple archives at once
-* Partial extraction
-* Raw dumps
-* Built-in path-finding mode for HashFS archives without directory listings
-* Automatic conversion of 3nK-encoded and encrypted SII files
-* Reading and executing DLL files
-* Can bypass extractor errors via plugins
+Интерфейс и встроенная справка доступны на русском и английском языках. При запуске без параметров открывается GUI; передача консольных параметров включает CLI. Если EXE открыть вместе с одним архивом без дополнительных параметров, этот файл будет добавлен в графический интерфейс.
 
+## Поддерживаемые форматы
 
-## Build
-For x64 Windows, a standalone executable is available on the Releases page. On other platforms, install the
-.NET 10 SDK and run the following:
+- **HashFS v1** — чтение таблицы, восстановление скрытых путей, распаковка, raw-дамп, просмотр записей, изменение манифеста и повторное zlib-сжатие.
+- **HashFS v2** — чтение раздельных таблиц путей и метаданных, salted CityHash64, GDeflate-текстуры TOBJ+DDS, глубокий поиск и распаковка.
+- **ZIP/eZIP** — обычные и намеренно нестандартные ZIP-пакеты SCS, включая архивы с ложными служебными структурами.
+- **AEM** — чтение и распаковка AEM-пакетов, а также изменение `manifest.sii`.
 
-```sh
-git clone https://github.com/sk-zk/Extractor.git
-cd Extractor
-dotnet publish -c Release
+Повреждённые, дублирующиеся и подозрительные HashFS-записи классифицируются по причине и учитываются как junk. Если путь корректной записи восстановить невозможно, содержимое сохраняется в `_unknown`, а не теряется.
+
+## Основные возможности
+
+- Параллельная распаковка и параллельный анализ содержимого с автоматически подобранным числом потоков; предел можно задать в настройках.
+- Совместный анализ нескольких архивов: таблицы, каталоги и ссылки объединяются до глубокого поиска.
+- Быстрый поиск сначала по стартовой и публичной базе, затем анализ SII/SUI, моделей, материалов, TOBJ и других файлов со ссылками.
+- Восстановление абсолютных и относительных цепочек `SII → model → MAT → TOBJ → DDS`, включая родственные расширения моделей и файлов секторов карты.
+- Поддержка `--reference`: зависимые архивы участвуют в расшифровке путей, но сами не распаковываются.
+- Распаковка известных файлов, частичных каталогов, выбранных масок, raw-записей или всего архива.
+- Единые списки путей, файлов, дерево каталогов и таблица HashFS-записей для одного или нескольких архивов.
+- Добавление результата списка в существующий файл без дубликатов.
+- Раздельные выходные папки, пропуск существующих файлов, dry run и подробный лог.
+- Изменение `manifest.sii` в HashFS v1/v2, ZIP и AEM с атомарной заменой исходного архива.
+- Сжатие несжатых записей HashFS v1 с уплотнением архива или без него.
+- Опциональный обмен найденными путями через настраиваемое сообщественное хранилище. Получение и публикация включаются пользователем отдельно; сетевую операцию можно отменить.
+- Менеджер внешних PYD/DLL-плагинов: установка, включение, отключение, удаление и настройки.
+
+## Графический интерфейс
+
+GUI содержит страницы архивов, параметров, настроек, плагинов, журнала и справки. Команда запуска всегда видна до выполнения. Журнал поддерживает несколько вкладок операций, цветовые уровни, копирование текста, сворачиваемые подробности по каждому архиву и сохранение полного вывода без ограничения на видимое число строк.
+
+Настройки сохраняются рядом с приложением. В них находятся язык, максимальное число потоков, значения `--deep` и `--log` по умолчанию, путь журнала и сетевые параметры. Значения по умолчанию лишь устанавливают галочки при новом запуске и не мешают отключить их для текущей операции.
+
+## Быстрый старт
+
+```powershell
+# Обычная распаковка
+.\UniversalSCSExtractor.exe .\mod.scs --dest=.\extracted
+
+# Глубокое восстановление скрытых HashFS-путей
+.\UniversalSCSExtractor.exe .\part1.scs .\part2.scs --deep --dest=.\extracted --log
+
+# Использование зависимостей только как справочных архивов
+.\UniversalSCSExtractor.exe .\addon.scs --reference .\base.scs .\def.scs --deep
+
+# Список всех найденных файлов и каталогов без распаковки
+.\UniversalSCSExtractor.exe .\mod.scs --list-all --list-output=.\paths.txt
+
+# Дерево каталогов
+.\UniversalSCSExtractor.exe .\mod.scs --tree
 ```
 
+Без EXE приложение можно запустить из исходников:
 
-## Usage
-```
-extractor path... [options]
-```
-
-### General options
-<table>
-<thead>
-  <tr>
-    <td><b>Short</b></td>
-    <td><b>Long&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</b></td>
-    <td><b>Description</b></td>
-  </tr>
-</thead>
-<tr>
-  <td><code>-a</code></td>
-  <td><code>--all</code></td>
-  <td>Extracts all .scs archives in the specified directory.</td>
-</tr>
-<tr>
-  <td><code>-d</code></td>
-  <td><code>--dest</code></td>
-  <td>Sets the output directory. Defaults to <code>./extracted</code>.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--dry-run</code></td>
-  <td>Don't extract anything to disk.</td>
-</tr>
-<tr>
-  <td><code>-f</code></td>
-  <td><code>--filter</code></td>
-  <td><p>Limits extraction to files whose paths match one or more of the specified filter patterns. A filter pattern can be a simple wildcard pattern, 
-  where <code>?</code> matches one character and <code>*</code> matches zero or more characters, or a regex enclosed in <code>r/.../</code>.</p>
-  <p>Examples:<br>
-  <code>-f=*volvo_fh_2024*</code>: extract files or directories containing the string "volvo_fh_2024"<br>
-  <code>-f=*volvo*,*scania*</code>: extract files or directories containing the string "volvo" or "scania"<br>
-  <code>-f=/def/vehicle/truck/*/engine/*</code>: extract engine definitions for trucks</code><br>
-  <code>-f=r/\.p(m[acdg]|pd)$/</code>: extract model files (.pmd, .pmg, ...)</code>
-  </p>
-  <p>When using regex patterns, remember to insert escape characters where necessary.</p>
-  </td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--list</code></td>
-  <td>Lists paths contained in the archive. Can be combined with <code>--all</code>, <code>--deep</code>, <code>--filter</code>, and <code>--partial</code>.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--list-all</code></td>
-  <td>Lists all paths referenced by files in the archive, even if they are not contained in it.
-  (Implicitly activates <code>--deep</code>.) Can be combined with <code>--all</code>, <code>--filter</code>, and <code>--partial</code>.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--log</code></td>
-  <td>Writes a log file for debugging purposes. If no output path is specified,
-  the log file will be written to <code>./_extraction.log</code>.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--no-update</code></td>
-  <td>Don't update references to paths that had to be renamed during extraction.</td>
-</tr>
-<tr>
-  <td><code>-p</code></td>
-  <td><code>--partial</code></td>
-  <td><p>Limits extraction to the comma-separated list of files and/or directories specified.</p>
-  <p>Examples:<br>
-  <code>-p=/locale</code><br>
-  <code>-p=/def,/map</code><br>
-  <code>-p=/def/world/road.sii</code></p>
-  <p>When extracting a HashFS archive (without <code>--deep</code>), <b>directory traversal begins at the given paths</b>, allowing for
-  extraction of known directories and files not discoverable from the top level. This makes <code>--partial</code> distinctly different
-  from <code>--filter</code>. (In all other modes, extraction is limited to files whose paths begin with any of the strings given to 
-  this parameter.)</p>
-  </td>
-</tr>
-<tr>
-  <td><code>-P</code></td>
-  <td><code>--paths</code></td>
-  <td>Same as <code>--partial</code>, but expects a text file containing paths to extract, separated by
-  line breaks.</td>
-</tr>
-<tr>
-  <td><code>-q</code></td>
-  <td><code>--quiet</code></td>
-  <td>Don't print paths of extracted files, and don't wait for a keypress after extraction when running outside the command line.</td>
-</tr>
-<tr>
-  <td><code>-S</code></td>
-  <td><code>--separate</code></td>
-  <td>When extracting multiple archives, extract each archive to a separate directory.</td>
-</tr>
-<tr>
-  <td><code>-s</code></td>
-  <td><code>--skip-existing</code></td>
-  <td>Don't overwrite existing files.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--tree</code></td>
-  <td>Prints the archive's directory tree. Can be combined with <code>--all</code>, <code>--deep</code>, and <code>--partial</code>.</td>
-</tr>
-<tr>
-  <td><code>-?</code>, <code>-h</code></td>
-  <td><code>--help</code></td>
-  <td>Prints the extractor's version and usage information.</td>
-</tr>
-</table>
-
-
-### HashFS options
-<table>
-<thead>
-  <tr>
-    <td><b>Short</b></td>
-    <td><b>Long&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</b></td>
-    <td><b>Description</b></td>
-  </tr>
-</thead>
-<tr>
-  <td></td>
-  <td><code>--additional</code></td>
-  <td>When using <code>--deep</code>, specifies additional start paths to search.
-  Expects a text file containing paths to extract, separated by line breaks.</td>
-</tr>
-<tr>
-  <td><code>-D</code></td>
-  <td><code>--deep</code></td>
-  <td>An extraction mode which scans the contained entries for referenced paths instead of traversing
-  the directory tree from <code>/</code>. Use this option to extract archives without a top level directory listing.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--list-entries</code></td>
-  <td>Lists entries contained in the archive.</td>
-</tr>
-<tr>
-  <td><code>-r</code></td>
-  <td><code>--raw</code></td>
-  <td>Dumps the contained files with their hashed filenames rather than traversing
-  the archive's directory tree.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--salt</code></td>
-  <td>Ignores the salt specified in the archive header and uses the given one instead.</td>
-</tr>
-<tr>
-  <td></td>
-  <td><code>--table-at-end</code></td>
-  <td>[v1 only] Ignores what the archive header says and reads the entry table from
-  the end of the file.</td>
-</tr>
-</table>
-
-### Plugin options
-
-<table>
-<thead>
-  <tr>
-    <td><b>Long&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;</b></td>
-    <td><b>Description</b></td>
-  </tr>
-</thead>
-<tr>
-  <td><code>--plugin-debug</code></td>
-  <td>Show debug information</td>
-</tr>
-<tr>
-  <td><code>--plugin-load-all</code></td>
-  <td>Load all available plugins regardless of their CanRun result.</td>
-</tr>
-<tr>
-  <td><code>--plugin-load=VALUE</code></td>
-  <td>Load only specific plugins by name(comma-separated). Example: --plugin-load=MyPlugin, AnotherPlugin</td>
-</tr>
-<tr>
-  <td><code>--plugin-disable=VALUE</code></td>
-  <td>Disable specific plugins by name (comma-separated).</td>
-</tr>
-<tr>
-  <td><code>--plugin-dir=VALUE</code></td>
-  <td>Load plugins from a specific directory instead of the default.</td>
-</tr>
-<tr>
-  <td><code>--plugin-prefix=VALUE</code></td>
-  <td>Load only plugins whose DLL filename starts with the given prefix.</td>
-</tr>
-<tr>
-  <td><code>--plugin-verbose</code></td>
-  <td>Show detailed information about loaded plugins.</td>
-</tr>
-<tr>
-  <td><code>--plugin-save-output</code></td>
-  <td>Save plugin output to separate files in the plugin directory.</td>
-</tr>
-<tr>
-  <td><code>--plugin-list</code></td>
-  <td>List all available plugins and exit. Use with --plugin-verbose for more details.</td>
-</tr>
-<tr>
-  <td><code>--plugin-ignore-exit</code></td>
-  <td>Ignore Environment.Exit calls from plugins.</td>
-</tr>
-<tr>
-  <td><code>--plugin-bypass</code></td>
-  <td>Calls plugins that bypass extractor errors.</td>
-</tr>
-</table>
-
-
-### Examples
-Normal extraction:
-```sh
-extractor "path\to\file.scs"
+```powershell
+python .\Extractor\extractor.py .\mod.scs --deep
 ```
 
-Extract two .scs files at once:
-```sh
-extractor "path\to\file1.scs" "path\to\file2.scs"
-```
+## Параметры CLI
 
-Extract all .scs files in a directory:
-```sh
-extractor "path\to\directory" --all
-```
+### Вход, поиск и распаковка
 
-Extract `def` and `manifest.sii` only:
-```sh
-extractor "path\to\file.scs" --partial=/def,/manifest.sii
-```
+| Параметр | Назначение |
+| --- | --- |
+| `path...` | Один или несколько архивов. |
+| `-a`, `--all` | Считать входные пути папками и обработать все `.scs` непосредственно внутри них. |
+| `-D`, `--deep` | Восстановить скрытые HashFS-пути по таблицам, содержимому и ссылкам; ненайденное сохранить в `_unknown`. |
+| `-d DIR`, `--dest DIR` | Папка назначения; по умолчанию `extracted`. Явное указание включает распаковку. |
+| `--additional FILE` | Дополнительный UTF-8/UTF-16 список кандидатов путей, по одному в строке. |
+| `-ref`, `--reference ARCHIVE...` | Архивы-зависимости для поиска путей без их распаковки; включает `--deep`. |
+| `-f`, `--filter PATTERNS` | Маски через запятую (`*.sii,/def/*`) или регулярное выражение `r/.../`. Можно повторять. |
+| `-p`, `--partial PATHS` | Распаковать только перечисленные через запятую файлы или каталоги. |
+| `-P`, `--paths FILE` | То же, но начальные пути читаются из файла. |
+| `-S`, `--separate` | Для нескольких архивов создать отдельную папку каждому. |
+| `-s`, `--skip-existing` | Не заменять уже существующие файлы. |
+| `-r`, `--raw` | Сохранить HashFS-записи под шестнадцатеричными хешами без обхода дерева. |
+| `--salt NUMBER` | Принудительно задать HashFS salt от 0 до 65535. |
+| `--no-update` | Не исправлять внутренние ссылки после переименования недопустимых путей. |
+| `-q`, `--quiet` | Скрыть построчный вывод, сохранив этапы и итоговую статистику. |
+| `--dry-run` | Выполнить чтение, анализ и проверку без записи файлов. |
 
-Extract model files only:
-```sh
-extractor "path\to\file.scs" --filter=r/\.p(m[acdg]|pd)$/
-```
+### Просмотр структуры
 
-Extract with deep mode:
-```sh
-extractor "path\to\file.scs" --deep
-```
+| Параметр | Назначение |
+| --- | --- |
+| `--list` | Вывести пути реально содержащихся файлов. |
+| `--list-all` | Вывести файлы и каталоги, включая найденные ссылки; для HashFS включает глубокий поиск. |
+| `--list-output FILE` | Записать список в файл, дополняя существующий без дубликатов. |
+| `--list-entries` | Вывести хеши, смещения, размеры, флаги и типы HashFS-записей. |
+| `--tree` | Построить общее дерево каталогов выбранных архивов. |
+| `--force-extract` | Одновременно выполнить выбранный режим просмотра и распаковку. Распаковку также включают явно заданные `--dest`, `--separate`, `--skip-existing`, `--raw`, `--paths`, `--partial` и `--no-update`. |
 
-Extract with deep mode when the mod is split into multiple archives:
-```sh
-extractor "file1.scs" "file2.scs" "file3.scs" --deep --separate
-```
+### Обслуживание архивов
 
-Alternatively:
-```sh
-extractor "path\to\mod\directory" --all --deep --separate
-```
+| Параметр | Назначение |
+| --- | --- |
+| `--manifest` | Удалить `compatible_versions[]` из `manifest.sii` и атомарно заменить архив. |
+| `--manifest-replace OLD=NEW` | Дополнительно заменить текст; параметр можно повторять или разделять пары `;`. |
+| `--edit` | Интерактивный ввод замен манифеста в консоли. |
+| `--compress` | Сжать несжатые записи HashFS v1 и уплотнить архив. |
+| `-jc`, `--jc` | Сжать HashFS v1 без удаления освободившихся областей. |
+| `--table-at-end` | Для нестандартного HashFS v1 прочитать таблицу с конца, игнорируя offset заголовка. |
+| `--log [FILE]` | Включить лог; без имени используется `_extraction.log`. |
 
-### Plugin Examples
+### Плагины
 
-Just run your plugin:
-```sh
-extractor.exe "file.scs" --deep --myplugin
-```
-View information about the plugin's work:
-```sh
-extractor.exe "file.scs" --deep --myplugin --plugin-debug
-```
-Force loading your plugin:
-```sh
-extractor.exe "file.scs" --deep --plugin-load=MyPlugin
-```
-Run plugins that bypass errors:
-```sh
-extractor.exe "file.scs" --deep --plugin-bypass
-```
-Force load all plugins from a folder:
-```sh
-extractor.exe "file.scs" --deep --plugin-load-all
-```
-Force loading all plugins from the folder that start with My:
-```sh
-extractor.exe "file.scs" --deep --plugin-load-all --plugin-prefix=My
-```
-Force loading of your and other plugins with mandatory execution of each:
-```sh
-extractor.exe "file.scs" --deep --myplugin --plugin-load=OtherPlugin --plugin-ignore-exit
-```
+| Параметр | Назначение |
+| --- | --- |
+| `--plugin-load FILE` | Установить `.pyd` или native `.dll` рядом с приложением. |
+| `--plugin-list` | Показать активные и доступные плагины. |
+| `--plugin-activate NAME` | Включить плагин по ID, имени или файлу; `ALL` включает все. |
+| `--plugin-disable NAME` | Отключить плагин; `ALL` отключает все. |
+| `-?`, `-h`, `--help` | Полная актуальная консольная справка. |
 
+## Как создать плагин
 
-## Plugin Development
+Экстрактор загружает плагины из каталога рядом с приложением и рекурсивно из `Plugins`. Поддерживаются расширения `.pyd` и `.dll`; исходный `.py` напрямую не загружается.
 
-### CSPROJ Structure
+Минимальный PYD-плагин экспортирует словарь `PLUGIN_INFO` и функцию `execute`. Исходник можно собрать в extension-модуль через Cython или другой совместимый инструмент; версия CPython и архитектура PYD должны совпадать с приложением.
 
-```xml
-<!--This is a template. You can use it for all plugins. Just rename it!-->
-<Project Sdk="Microsoft.NET.Sdk">
-
-  <ItemGroup>
-    <ProjectReference Include="..\Extractor\Extractor.csproj" /> <!--REQUIRED REFERENCE!!!-->
-                             <!--Specify the path to the downloaded .csproj file from the source code of this program.-->
-  </ItemGroup>
-
-  <PropertyGroup>
-    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
-    <TargetFramework>net10.0</TargetFramework>
-    <ImplicitUsings>enable</ImplicitUsings>
-    <Nullable>enable</Nullable>
-  </PropertyGroup>
-
-</Project>
-```
-
-### Default Plugin structure
-
-```csharp
-using System; //<--- REQUIRED
-using System.Linq; //<--- Recommended
-using System.IO; //<--- Recommended
-using Extractor; //<--- REQUIRED
-using Serilog; //<--- Recommended
-using TruckLib; //<--- Recommended
-using TruckLib.HashFs; //<--- Recommended
-using TruckLib.Sii; //<--- Recommended
-
-namespace Extractor.Deep //namespace Extractor is REQUIRED, but I highly recommend use namespace Extractor.Deep for more useful information
-{
-    public class PluginName //Your plugin name
-    {
-        public static bool CanRun(string[] args) //<---REQURED method
-        {
-            return args.Any(a => a.Equals("--plugin", StringComparison.OrdinalIgnoreCase) || a.Equals("-plugin", StringComparison.OrdinalIgnoreCase)); //This is a prerequisite for running the plugin. You can configure it.
-        }
-
-        //Optional variables for configuring plugin startup. They are not required; by default, false
-        public static bool RunAfterExtraction(){return true;} //<--- Runs the plugin after the extractor actions.
-        public static bool IgnoreExit(){return true;} //<--- Ignores Enviroment.Exit(0). Allows the plugin to run in any case.
-
-        public static void Run(string[] args, Extractor extractor, ILogger logger) //<--- Required MAIN Plugin logic method
-        {
-          //If you use the Extractor.Deep namespace, you should be aware that missing the --deep parameter may cause the code to behave incorrectly.
-          if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
-            {
-                Console.WriteLine("Requires --deep launch parameter!");
-                Console.WriteLine("If you wrote it, it means the archive is either a regular ZIP or a regular HashFs, which can be unpacked in the usual way.");
-                //Stops process without --deep
-                Environment.Exit(0);
-            }
-            //Your Code
-            int entries = 0;
-            foreach(var entry in entries)
-            {
-            }
-            //Stops the entire program. But if you need to continue, you don't have to write this.
-            Environment.Exit(0);
-        }
-    }
+```python
+PLUGIN_INFO = {
+    "api_version": 1,
+    "id": "my-plugin",
+    "name": "My plugin",
+    "version": "1.0.0",
+    "active_by_default": False,
+    "settings": {},
 }
+
+def execute(event: str, context: dict) -> dict:
+    # События API v1: gui.initialize, console.initialize, console.complete.
+    return {}
 ```
 
-### Error Bypass Plugin Structure
+Native DLL использует C ABI и возвращает UTF-8 JSON:
 
-```csharp
-// WARNING: Its very hard. Highly Not Recommended.
-using System;
-using System.Linq;
-using System.Reflection;
-using Extractor;
-using TruckLib.HashFs;
-using Serilog;
-
-namespace Extractor.Deep // or Extractor namespace
-{
-    public class YourPluginName
-    {
-        // REQUIRED: Determines if the plugin should be loaded
-        public static bool CanRun(string[] args)
-        {
-            // Your conditions for plugin activation
-            return args.Any(a => a.Equals("--yourplugin", StringComparison.OrdinalIgnoreCase));
-        }
-
-        // OPTIONAL: If true, runs after extraction completes
-        public static bool RunAfterExtraction() => false;
-
-        // OPTIONAL: If true, ignores Environment.Exit calls
-        public static bool IgnoreExit() => true;
-
-        // REQUIRED FOR ERROR BYPASS: Returns bypass criteria
-        public static object ErrorBypass()
-        {
-            return new
-            {
-                // Required for automatic patching
-                Libraries = new[] { "TruckLib.HashFs" },
-                // Target file/class to patch
-                File = "HashFsV2Reader",
-                // Original method to replace
-                Method = "OriginalMethod",
-                // Your patch method name
-                PatchMethod = "PatchedOriginalMethod"
-            };
-        }
-
-        // REQUIRED: Main plugin logic
-        public static void Run(string[] args, Extractor extractor, ILogger logger)
-        {
-            var _logger = logger.ForContext("SourceContext", "YourPluginName");
-
-            // Initialize your patch
-            YourPluginPatch.Logger = _logger;
-            YourPluginPatch.Initialize();
-
-            // Apply the patch
-            Patcher.ApplyPatch(
-                pluginName: "YourPluginName",
-                targetType: typeof(FileForPatching),
-                methodName: "ParseEntries",
-                patchClass: typeof(YourPluginPatch),
-                patchMethodName: "PatchedParseEntries",
-                methodBindingFlags: BindingFlags.NonPublic | BindingFlags.Instance
-            );
-        }
-    }
-
-    public static class YourPluginPatch
-    {
-        public static ILogger? Logger { get; set; }
-
-        public static void Initialize()
-        {
-            // Setup any required reflection or delegates
-            Logger?.Debug("Initializing plugin...");
-        }
-
-        // Your patched method (must match the original signature)
-        public static void PatchedParseEntries(HashFsV2Reader instance)
-        {
-            Logger?.Information("Patched method called!");
-
-            // Your custom logic here
-            // Can modify behavior, handle errors, etc.
-
-            // Optionally call original method:
-            // Patcher.CallOriginalMethod(instance);
-        }
-    }
-}
+```c
+const char *use_plugin_info(void);
+const char *use_plugin_execute(const char *event_name, const char *context_json);
 ```
 
-### Error Bypass Plugin Notes
+`use_plugin_info()` должен вернуть объект с `api_version`, `id`, `name` и `version`; `use_plugin_execute()` — JSON-объект результата. Память возвращаемых строк должна оставаться действительной до следующего вызова этой DLL. Состояние активации и пользовательские настройки хранятся в `plugins.json`.
 
-1. ErrorBypass() method is REQUIRED and returns criteria for automatic patching
-2. Libraries array - specify which libraries need patching
-3. File - the target class file name
-4. Method - original method to be replaced
-5. PatchMethod - your custom method name
-6. Use ```--plugin-bypass``` or ```--plugin-load``` to activate bypass plugins
-7. ```Patcher.ApplyPatch()``` applies runtime method patching
+## Сборка
 
-### Minimal plugin
+Требуется Python 3.11+; зависимости сборки перечислены в `requirements-build.txt`.
 
-```csharp
-using System;
-using System.Linq;
-using Extractor;
-using TruckLib.HashFs;
+```powershell
+# Автоматический формат текущей ОС
+python .\build.py
 
-namespace Extractor.Deep
-{
-    public class MyPlugin
-    {
-        public static bool CanRun(string[] args)
-        {
-            return args.Any(a => a.Equals("--myplugin", StringComparison.OrdinalIgnoreCase));
-        }
-        public static bool RunAfterExtraction(){
-          return true;
-        }
-        public static bool IgnoreExit(){
-          return false;
-        }
+# Windows EXE
+python .\build.py --format exe
 
-        public static void Run(string[] args, Extractor extractor)
-        {
-            if (!args.Any(a => a.Equals("--deep", StringComparison.OrdinalIgnoreCase)))
-            {
-                Console.WriteLine("Requires --deep launch parameter!");
-                Console.WriteLine("If you wrote it, it means the archive is either a regular ZIP or a regular HashFs, which can be unpacked in the usual way.");
-                Environment.Exit(0);
-            }
-            Console.WriteLine("MyPlugin started!");
-
-            if (extractor is HashFsDeepExtractor deep)
-            {
-                Console.WriteLine($"Archive: {extractor.ScsPath}");
-                Console.WriteLine($"Entries: {deep.Reader.Entries.Count}");
-            }
-
-            Console.WriteLine("MyPlugin finished!");
-            Environment.Exit(0);
-        }
-    }
-}
+# Linux DEB/RPM или macOS APP — выполнять на соответствующей ОС
+python .\build.py --format deb
+python .\build.py --format rpm
+python .\build.py --format app
 ```
 
-### Compile Your Plugin
+`--skip-install` запрещает автоматическую установку сборочных зависимостей. Для служебной сборки с заранее заданным сообщественным источником путей предусмотрены `--community-webhook` и `--community-message-id`; без них пользователь вводит подключение в GUI. Секрет, встроенный в клиентское приложение, невозможно сделать полностью недоступным владельцу компьютера.
 
-1. Install `Microsoft .NET Framework`.
-2. Open `Microsoft PowerShell` in folder with your plugin.
-3. Write <code>dotnet build -c Release</code>
-4. Go to `YourPlugin\bin\Release\net10.0\` and get `YourPlugin.dll`. It is your compiled plugin.
-5. Then just place it in the folder with the rest of the plugins and try to run it.
+В Windows также доступен `build.ps1`. Результат помещается в `dist`; Linux-пакеты больше не складываются во вложенный `dist/packages`.
 
-### Notes
+## Структура исходников
 
-- Plugins must be in the same folder as `extractor.exe`! Or specify a different folder in the launch options.
-- Not all the necessary functions for working with .scs files are available in the extractor. Try searching for them in TruckLib.
-- There's no need to change or add to the standard extractor parameters. Improve yours.
-- Keep in mind that you will lose a lot if you don't use --deep.
-- Before you begin, please review the extractor code and the structure of what you're about to process. This will prevent you from making silly mistakes and save you time.
-- Compile your plugins only into DLL files. The program won't read any other files.
+| Каталог | Назначение |
+| --- | --- |
+| `Extractor` | CLI, GUI, ZIP/AEM, глубокий поиск, журнал, плагины и обслуживание архивов. |
+| `TruckLib.Core` | Базовые типы, двоичный ввод-вывод и абстракции файловых систем. |
+| `TruckLib.HashFs` | CityHash64 и чтение HashFS v1/v2. |
+| `TruckLib.Models` | Форматы моделей, материалов, TOBJ и связанные структуры. |
+| `TruckLib.Sii` | SII/SUI/MAT, includes, 3nK и ScsC. |
+| `GisDeflate` | Декодирование GDeflate-текстур. |
 
-## CREDITS:
-1. <a href="https://github.com/V4SS3UR/DetourUtility">DetourUtility</a> by V4SS3UR. Thanks for creating a cool and multifunctional utility.
+## Лицензия
+
+Основной проект распространяется на условиях **GNU General Public License v2.0** — см. [LICENSE](LICENSE). Сторонние компоненты сохраняют собственные уведомления и лицензии в своих каталогах; в частности, для `GisDeflate` действует отдельный файл `GisDeflate/LICENSE_GPLv3.txt`.
+
+Проект не связан с SCS Software. Названия Euro Truck Simulator, American Truck Simulator и SCS используются только для описания совместимости.
