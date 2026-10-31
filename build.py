@@ -197,7 +197,9 @@ def stage_linux_layout(app: Application, artifact: Path, stage: Path) -> None:
     for name in ("README.md", "LICENSE"):
         source = app.project / name
         if source.is_file():
-            shutil.copy2(source, docs / name)
+            target = docs / name
+            shutil.copy2(source, target)
+            target.chmod(0o644)
     if not any(docs.iterdir()):
         (docs / "README.txt").write_text(app.description + "\n", encoding="utf-8")
 
@@ -255,6 +257,16 @@ def build_rpm(app: Application, artifact: Path, args: argparse.Namespace) -> Pat
             archive.add(source_root, arcname=source_root.name)
         spec = root / "SPECS" / f"{app.package}.spec"
         spec.write_text(textwrap.dedent(f"""\
+            # PyInstaller stores its embedded application archive after the ELF
+            # payload.  RPM's default brp-strip/debug post-processing may alter
+            # that finished executable and make it exit before Python starts.
+            %global __os_install_post %{{nil}}
+            %global debug_package %{{nil}}
+            # The extractor and packer use the same PyInstaller bootloader and
+            # can consequently receive the same ELF build ID.  Per-package
+            # build-id links would then conflict under /usr/lib/.build-id.
+            %global _build_id_links none
+
             Name:           {app.package}
             Version:        {args.version}
             Release:        1%{{?dist}}
@@ -271,14 +283,18 @@ def build_rpm(app: Application, artifact: Path, args: argparse.Namespace) -> Pat
 
             %install
             rm -rf %{{buildroot}}
-            cp -a usr %{{buildroot}}/
+            install -D -m 0755 usr/bin/{app.package} %{{buildroot}}/usr/bin/{app.package}
+            install -D -m 0644 usr/share/applications/{app.package}.desktop %{{buildroot}}/usr/share/applications/{app.package}.desktop
+            install -D -m 0644 usr/share/icons/hicolor/256x256/apps/{app.package}.png %{{buildroot}}/usr/share/icons/hicolor/256x256/apps/{app.package}.png
+            install -D -m 0644 usr/share/doc/{app.package}/README.md %{{buildroot}}/usr/share/doc/{app.package}/README.md
+            install -D -m 0644 usr/share/doc/{app.package}/LICENSE %{{buildroot}}/usr/share/doc/{app.package}/LICENSE
 
             %files
             /usr/bin/{app.package}
             /usr/share/applications/{app.package}.desktop
             /usr/share/icons/hicolor/256x256/apps/{app.package}.png
-            %dir /usr/share/doc/{app.package}
-            /usr/share/doc/{app.package}/*
+            %doc /usr/share/doc/{app.package}/README.md
+            %license /usr/share/doc/{app.package}/LICENSE
             """), encoding="utf-8")
         run(["rpmbuild", "--define", f"_topdir {root}", "-bb", str(spec)])
         results = list((root / "RPMS").rglob("*.rpm"))
@@ -299,6 +315,18 @@ def build_macos_zip(app: Application, artifact: Path, args: argparse.Namespace) 
     output.unlink(missing_ok=True)
     run(["ditto", "-c", "-k", "--sequesterRsrc", "--keepParent",
          str(artifact), str(output)])
+    if not output.is_file():
+        raise BuildError(f"ditto completed without creating {output}")
+    # PyInstaller leaves both the bundle and its standalone Mach-O executable
+    # in dist. They are intermediate macOS build products; the release artifact
+    # is the ZIP which preserves the complete .app bundle.
+    if artifact.is_dir():
+        shutil.rmtree(artifact)
+    elif artifact.exists():
+        artifact.unlink()
+    standalone = release / app.executable
+    if standalone.is_file():
+        standalone.unlink()
     print(f"Package: {output}")
     return output
 
