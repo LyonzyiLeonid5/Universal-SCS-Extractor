@@ -188,6 +188,8 @@ python .\build.py --format app
 
 Основной проект распространяется на условиях **GNU General Public License v2.0** — см. [LICENSE](LICENSE). Сторонние компоненты сохраняют собственные уведомления и лицензии в своих каталогах; в частности, для `GisDeflate` действует отдельный файл `GisDeflate/LICENSE_GPLv3.txt`.
 
+Проект основан на разработках **sk-zk** и является их улучшенной и адаптированной реализацией.
+
 Проект не связан с SCS Software. Названия Euro Truck Simulator, American Truck Simulator и SCS используются только для описания совместимости.
 
 ---
@@ -377,5 +379,7 @@ python .\build.py --format app
 ### License
 
 The main project is distributed under the **GNU General Public License v2.0**; see [LICENSE](LICENSE). Third-party components retain their own notices and licenses in their respective directories. In particular, `GisDeflate/LICENSE_GPLv3.txt` applies to the GisDeflate component.
+
+This project is based on work by **sk-zk** and provides an improved and adapted implementation of it.
 
 This project is not affiliated with SCS Software. Euro Truck Simulator, American Truck Simulator, and SCS names are used only to describe compatibility.
